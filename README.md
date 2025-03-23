@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Excel文件合并工具
 
 这是一个用于合并多个Excel文件的工具，专门用于处理营销现场作业计划审批表。
@@ -156,3 +157,7 @@ pip install -r requirements.txt
 - 添加进度条显示
 - 优化时间格式显示（YYYY/MM/DD）
 - 输出文件自动保存到桌面 
+=======
+# excel-merger-tool
+文件合并工具（营销现场作业计划审批表专用）
+>>>>>>> 1c0ce3d61e4c394d7739e798adef66f391d3d338
