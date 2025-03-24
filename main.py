@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton, QVBoxLayout, 
                            QWidget, QFileDialog, QMessageBox, QListWidget, QLabel,
-                           QHBoxLayout, QTableWidget, QTableWidgetItem, QProgressBar)
+                           QHBoxLayout, QTableWidget, QTableWidgetItem, QProgressBar, QTextEdit)
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QIcon, QColor
 import pandas as pd
@@ -164,13 +164,19 @@ class ExcelMergerApp(QMainWindow):
         )
         
         if files:
-            if len(files) > 5:
+            # 检查总文件数是否超过限制
+            total_files = len(self.selected_files) + len(files)
+            if total_files > 5:
                 QMessageBox.warning(self, '警告', '最多只能选择5个文件！')
-                files = files[:5]
+                # 只添加能够添加的文件数量
+                files = files[:5 - len(self.selected_files)]
             
-            self.selected_files = files
-            self.file_list.addItems([os.path.basename(f) for f in files])
-            self.status_label.setText(f'已选择 {len(files)} 个文件')
+            # 添加新选择的文件
+            self.selected_files.extend(files)
+            # 清空列表并重新显示所有文件
+            self.file_list.clear()
+            self.file_list.addItems([os.path.basename(f) for f in self.selected_files])
+            self.status_label.setText(f'已选择 {len(self.selected_files)} 个文件')
 
     def select_template(self):
         """选择模板文件"""
@@ -189,63 +195,121 @@ class ExcelMergerApp(QMainWindow):
     def merge_files(self):
         """合并文件"""
         if not self.selected_files:
-            QMessageBox.warning(self, '警告', '请先选择要合并的Excel文件！')
+            QMessageBox.warning(self, "警告", "请先选择要合并的文件！")
             return
-        
+            
         if not self.template_file:
-            QMessageBox.warning(self, '警告', '请先选择输出模板文件！')
+            QMessageBox.warning(self, "警告", "请先选择输出模板文件！")
             return
-
-        # 禁用按钮，显示进度条
-        self.select_button.setEnabled(False)
-        self.clear_button.setEnabled(False)
-        self.template_button.setEnabled(False)
-        self.merge_button.setEnabled(False)
-        self.preview_button.setEnabled(False)
+            
+        # 显示进度条
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
-
-        # 创建并启动工作线程
-        self.merge_thread = MergeWorker(self.processor, self.selected_files, self.template_file)
-        self.merge_thread.progress_updated.connect(self.update_progress)
-        self.merge_thread.finished.connect(self.merge_completed)
-        self.merge_thread.error.connect(self.merge_error)
-        self.merge_thread.start()
-
-    def update_progress(self, value):
-        """更新进度条"""
-        self.progress_bar.setValue(value)
-
-    def merge_completed(self, success, message):
-        """合并完成的处理"""
-        # 恢复按钮状态
-        self.select_button.setEnabled(True)
-        self.clear_button.setEnabled(True)
-        self.template_button.setEnabled(True)
-        self.merge_button.setEnabled(True)
-        self.preview_button.setEnabled(True)
+        
+        # 创建处理线程
+        self.worker = MergeWorker(self.processor, self.selected_files, self.template_file)
+        
+        # 连接信号
+        self.worker.progress_updated.connect(self.progress_bar.setValue)
+        self.worker.finished.connect(self.handle_merge_finished)
+        self.worker.error.connect(self.handle_merge_error)
+        
+        # 开始处理
+        self.worker.start()
+        
+        # 禁用按钮
+        self.merge_button.setEnabled(False)
+        self.select_button.setEnabled(False)
+        self.template_button.setEnabled(False)
+        
+    def handle_merge_error(self, error_message):
+        """处理合并错误"""
         self.progress_bar.setVisible(False)
         
-        # 显示成功消息
-        if success:
-            QMessageBox.information(self, "成功", message)
-            self.status_label.setText(message)
+        # 创建详细的错误信息对话框
+        error_dialog = QMessageBox(self)
+        error_dialog.setIcon(QMessageBox.Critical)
+        error_dialog.setWindowTitle("错误")
+        error_dialog.setText("合并过程中出现错误")
+        
+        # 分析错误信息
+        if "详细错误信息：" in error_message:
+            main_error, detailed_error = error_message.split("详细错误信息：", 1)
+            error_dialog.setInformativeText(main_error.strip())
+            error_dialog.setDetailedText(detailed_error.strip())
         else:
-            QMessageBox.critical(self, '错误', message)
-            self.status_label.setText('合并失败：' + message)
-
-    def merge_error(self, error_message):
-        """合并错误的处理"""
-        QMessageBox.critical(self, '错误', error_message)
-        self.status_label.setText('合并失败：' + error_message)
+            error_dialog.setDetailedText(error_message)
         
-        # 恢复按钮状态
-        self.select_button.setEnabled(True)
-        self.clear_button.setEnabled(True)
-        self.template_button.setEnabled(True)
+        error_dialog.setStandardButtons(QMessageBox.Ok)
+        
+        # 调整对话框大小
+        text_browser = error_dialog.findChild(QTextEdit)
+        if text_browser is not None:
+            text_browser.setMinimumSize(600, 400)
+        
+        error_dialog.exec_()
+        
+        # 重新启用按钮
         self.merge_button.setEnabled(True)
-        self.preview_button.setEnabled(True)
+        self.select_button.setEnabled(True)
+        self.template_button.setEnabled(True)
+        
+        # 更新状态
+        self.status_label.setText("合并失败，请查看错误信息")
+        
+    def handle_merge_finished(self, success, message):
+        """处理合并完成"""
         self.progress_bar.setVisible(False)
+        
+        if success:
+            # 检查是否有警告信息
+            if "但存在以下问题：" in message:
+                warning_dialog = QMessageBox(self)
+                warning_dialog.setIcon(QMessageBox.Warning)
+                warning_dialog.setWindowTitle("部分成功")
+                warning_dialog.setText("文件已合并，但存在一些问题")
+                warning_dialog.setDetailedText(message)
+                warning_dialog.setStandardButtons(QMessageBox.Ok)
+                
+                # 调整对话框大小
+                text_browser = warning_dialog.findChild(QTextEdit)
+                if text_browser is not None:
+                    text_browser.setMinimumSize(600, 400)
+                
+                warning_dialog.exec_()
+                self.status_label.setText("合并完成，但有部分问题")
+            else:
+                QMessageBox.information(self, "成功", message)
+                self.status_label.setText("合并完成！")
+        else:
+            # 创建详细的错误信息对话框
+            error_dialog = QMessageBox(self)
+            error_dialog.setIcon(QMessageBox.Critical)
+            error_dialog.setWindowTitle("错误")
+            error_dialog.setText("合并失败")
+            
+            # 分析错误信息
+            if "详细错误信息：" in message:
+                main_error, detailed_error = message.split("详细错误信息：", 1)
+                error_dialog.setInformativeText(main_error.strip())
+                error_dialog.setDetailedText(detailed_error.strip())
+            else:
+                error_dialog.setDetailedText(message)
+            
+            error_dialog.setStandardButtons(QMessageBox.Ok)
+            
+            # 调整对话框大小
+            text_browser = error_dialog.findChild(QTextEdit)
+            if text_browser is not None:
+                text_browser.setMinimumSize(600, 400)
+            
+            error_dialog.exec_()
+            self.status_label.setText("合并失败，请查看错误信息")
+        
+        # 重新启用按钮
+        self.merge_button.setEnabled(True)
+        self.select_button.setEnabled(True)
+        self.template_button.setEnabled(True)
 
     def preview_file(self):
         """打开文件预览窗口"""

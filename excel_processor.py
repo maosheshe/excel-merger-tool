@@ -15,35 +15,51 @@ class ExcelProcessor:
         self.duplicate_rows = []
         self.merged_data = None
 
-    def validate_headers(self, file_path):
-        """验证文件的表头结构（保留此方法以兼容旧代码）"""
+    def validate_headers_df(self, df):
+        """验证数据框的表头结构，返回(是否有效, 错误信息)"""
         try:
-            # 尝试从第4行和第5行读取表头
-            for header_row in [3, 4]:  # 因为pandas的header参数是从0开始计数的
-                try:
-                    df = pd.read_excel(file_path, header=header_row)
-                    if self.validate_headers_df(df):
-                        return True, "验证成功"
-                except:
-                    continue
-            return False, f"文件 {os.path.basename(file_path)} 的列结构不正确"
+            # 获取表头列名
+            columns = df.columns.tolist()
+            
+            # 检查B列是否为"作业类型（内容）"
+            if len(columns) <= 1:
+                return False, "表格结构错误：表格列数不足，至少需要15列"
+            if columns[1] != "作业类型（内容）":
+                return False, f"表头错误：B列的表头应为'作业类型（内容）'，当前为'{columns[1]}'"
+            
+            # 检查必需的列是否都存在
+            missing_columns = []
+            for col in self.REQUIRED_COLUMNS:
+                if col not in columns:
+                    missing_columns.append(col)
+            
+            if missing_columns:
+                return False, f"缺少必要列：{', '.join(missing_columns)}"
+            
+            return True, "验证成功"
         except Exception as e:
             return False, f"验证失败：{str(e)}"
 
-    def validate_headers_df(self, df):
-        """验证数据框的表头结构"""
-        # 获取表头列名
-        columns = df.columns.tolist()
-        
-        # 检查必需的列是否都存在
-        if not all(col in columns for col in self.REQUIRED_COLUMNS):
-            return False
+    def validate_headers(self, file_path):
+        """验证文件的表头结构"""
+        try:
+            # 尝试从第4行和第5行读取表头
+            errors = []
+            for header_row in [3, 4]:  # 因为pandas的header参数是从0开始计数的
+                try:
+                    df = pd.read_excel(file_path, header=header_row)
+                    is_valid, message = self.validate_headers_df(df)
+                    if is_valid:
+                        return True, "验证成功"
+                    errors.append(f"第{header_row+1}行作为表头时：{message}")
+                except Exception as e:
+                    errors.append(f"读取第{header_row+1}行失败：{str(e)}")
             
-        # 检查B列是否为"作业类型（内容）"
-        if len(columns) > 1 and columns[1] != "作业类型（内容）":
-            return False
-            
-        return True
+            error_message = "表头验证失败：\n"
+            error_message += "\n".join(errors)
+            return False, error_message
+        except Exception as e:
+            return False, f"文件读取失败：{str(e)}"
 
     def process_file(self, file_path):
         """处理单个Excel文件"""
@@ -53,16 +69,27 @@ class ExcelProcessor:
             sheet_names = xl.sheet_names
 
             # 依次验证每个表格
+            all_errors = []
             for sheet_name in sheet_names:
+                sheet_errors = []
                 try:
-                    # 尝试从第4行和第5行读取表头
+                    # 尝试从第4行和第5行读取表头，使用engine='openpyxl'并忽略公式错误
                     for header_row in [3, 4]:  # 因为pandas的header参数是从0开始计数的
                         try:
-                            # 读取当前表格
-                            df = pd.read_excel(file_path, sheet_name=sheet_name, header=header_row)
+                            # 读取当前表格，添加额外的参数来处理错误
+                            df = pd.read_excel(
+                                file_path,
+                                sheet_name=sheet_name,
+                                header=header_row,
+                                engine='openpyxl',
+                                keep_default_na=True,
+                                na_values=[''],
+                                dtype=str  # 将所有列都作为字符串读取
+                            )
                             
                             # 验证表头
-                            if self.validate_headers_df(df):
+                            is_valid, message = self.validate_headers_df(df)
+                            if is_valid:
                                 # 删除空行（除序号外所有列都为空的行）
                                 df = df.loc[~((df.iloc[:, 1:].isna().all(axis=1)) & (df.iloc[:, 0].notna()))]
                                 
@@ -70,20 +97,30 @@ class ExcelProcessor:
                                 df = df.dropna(how='all')
                                 
                                 # 处理时间格式
-                                df['工作开始时间'] = pd.to_datetime(df['工作开始时间'], errors='coerce')
-                                df['工作结束时间'] = pd.to_datetime(df['工作结束时间'], errors='coerce')
+                                try:
+                                    df['工作开始时间'] = pd.to_datetime(df['工作开始时间'], errors='coerce')
+                                    df['工作结束时间'] = pd.to_datetime(df['工作结束时间'], errors='coerce')
+                                except Exception as e:
+                                    return None, f"时间格式转换失败：{str(e)}"
                                 
                                 # 重置索引
                                 df = df.reset_index(drop=True)
                                 
                                 return df, f"使用表格：{sheet_name}"
-                        except:
-                            continue
+                            else:
+                                sheet_errors.append(f"第{header_row+1}行作为表头时：{message}")
+                        except Exception as e:
+                            sheet_errors.append(f"读取第{header_row+1}行失败，请检查Excel文件格式是否正确，确保没有合并单元格或特殊格式：{str(e)}")
                 except Exception as e:
-                    continue  # 如果当前表格处理失败，继续尝试下一个表格
+                    sheet_errors.append(f"处理失败：{str(e)}")
+                
+                if sheet_errors:
+                    all_errors.append(f"\n表格 '{sheet_name}' 验证结果：\n" + "\n".join(sheet_errors))
 
             # 如果所有表格都验证失败
-            return None, f"文件 {os.path.basename(file_path)} 中没有找到有效的表格结构"
+            error_message = f"文件 {os.path.basename(file_path)} 中没有找到有效的表格结构：\n"
+            error_message += "\n".join(all_errors)
+            return None, error_message
 
         except Exception as e:
             return None, f"处理失败：{str(e)}"
@@ -91,30 +128,89 @@ class ExcelProcessor:
     def merge_files(self, file_paths):
         """合并多个Excel文件"""
         all_data = []
+        all_errors = []
+        
         for file_path in file_paths:
-            df, message = self.process_file(file_path)
-            if df is not None:
-                all_data.append(df)
+            try:
+                # 首先验证文件是否存在
+                if not os.path.exists(file_path):
+                    all_errors.append(f"文件不存在：{file_path}")
+                    continue
+                    
+                # 验证文件是否可以打开
+                try:
+                    xl = pd.ExcelFile(file_path)
+                except Exception as e:
+                    all_errors.append(f"无法打开文件 {os.path.basename(file_path)}：{str(e)}")
+                    continue
+                
+                # 处理文件
+                df, message = self.process_file(file_path)
+                if df is not None:
+                    # 验证数据有效性
+                    if len(df) == 0:
+                        all_errors.append(f"文件 {os.path.basename(file_path)} 没有有效数据")
+                        continue
+                    
+                    # 验证必要列的数据类型
+                    try:
+                        # 验证时间格式
+                        if pd.isna(df['工作开始时间']).all() or pd.isna(df['工作结束时间']).all():
+                            all_errors.append(f"文件 {os.path.basename(file_path)} 的时间列全为空")
+                            continue
+                            
+                        all_data.append(df)
+                    except Exception as e:
+                        all_errors.append(f"文件 {os.path.basename(file_path)} 数据验证失败：{str(e)}")
+                        continue
+                else:
+                    all_errors.append(message)
+            except Exception as e:
+                all_errors.append(f"处理文件 {os.path.basename(file_path)} 时出错：{str(e)}")
         
+        # 如果没有有效数据
         if not all_data:
-            return None, "没有有效数据可合并"
+            error_message = "合并失败，没有有效数据可合并。\n\n详细错误信息：\n"
+            error_message += "\n".join(all_errors)
+            return None, error_message
         
-        # 合并所有数据
-        self.merged_data = pd.concat(all_data, ignore_index=True)
-        
-        # 删除只有序号列有内容的行
-        self.merged_data = self.merged_data.loc[~((self.merged_data.iloc[:, 1:].isna().all(axis=1)) & (self.merged_data.iloc[:, 0].notna()))]
-        
-        # 按工作开始时间排序
-        self.merged_data = self.merged_data.sort_values('工作开始时间')
-        
-        # 重置索引
-        self.merged_data = self.merged_data.reset_index(drop=True)
-        
-        # 检查重复行
-        self.check_duplicates()
-        
-        return self.merged_data, "合并成功"
+        try:
+            # 合并所有数据
+            self.merged_data = pd.concat(all_data, ignore_index=True)
+            
+            # 验证合并后的数据
+            if len(self.merged_data) == 0:
+                return None, "合并后的数据为空"
+            
+            # 删除只有序号列有内容的行
+            self.merged_data = self.merged_data.loc[~((self.merged_data.iloc[:, 1:].isna().all(axis=1)) & (self.merged_data.iloc[:, 0].notna()))]
+            
+            # 验证是否还有数据
+            if len(self.merged_data) == 0:
+                return None, "删除无效行后没有剩余数据"
+            
+            # 按工作开始时间排序
+            try:
+                self.merged_data = self.merged_data.sort_values('工作开始时间')
+            except Exception as e:
+                return None, f"排序失败：{str(e)}"
+            
+            # 重置索引
+            self.merged_data = self.merged_data.reset_index(drop=True)
+            
+            # 检查重复行
+            self.check_duplicates()
+            
+            # 如果有错误但仍有可合并的数据，返回警告信息
+            if all_errors:
+                return self.merged_data, f"部分文件合并成功，但存在以下问题：\n" + "\n".join(all_errors)
+            
+            return self.merged_data, "合并成功"
+            
+        except Exception as e:
+            error_message = f"合并数据时出错：{str(e)}\n\n此前的错误信息：\n"
+            error_message += "\n".join(all_errors)
+            return None, error_message
 
     def check_duplicates(self):
         """检查并标记重复行"""
