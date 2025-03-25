@@ -253,7 +253,7 @@ class ExcelProcessor:
                     # 处理时间格式
                     elif col_idx in [7, 8]:  # 工作开始时间和工作结束时间列
                         if pd.notna(value):  # 检查是否为空
-                            cell.value = value.strftime("%Y/%m/%d")
+                            cell.value = value.strftime("%Y-%m-%d")
                     else:
                         cell.value = value
                     
@@ -288,7 +288,9 @@ class ExcelProcessor:
                         max_text_lines = max(max_text_lines, lines)
             
                 # 设置行高（每行文字高度为8个单位，额外加10个单位作为边距）
-                row_height = max(40, max_text_lines * 8+ 10)
+                row_height = max(40, max_text_lines * 6 + 5)
+                # 添加行高上限限制
+                row_height = min(row_height, 180)  # 新增行高上限
                 ws.row_dimensions[row_idx].height = row_height
             
             # 标记重复行
