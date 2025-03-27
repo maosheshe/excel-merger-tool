@@ -70,14 +70,46 @@ class FilePreviewWindow(QWidget):
                 info_text += f"行数: {len(df)}\n"
                 info_text += f"列数: {len(df.columns)}\n\n"
                 
-                # 显示列名
-                info_text += "列名列表:\n"
-                for col in df.columns:
-                    info_text += f"- {col}\n"
-                
-                # 显示前5行数据
-                info_text += "\n前5行数据预览:\n"
-                info_text += df.head().to_string()
+                try:
+                    # 获取数据（跳过前5行标题）
+                    data = df.iloc[5:]
+                    
+                    # 获取日期范围（A列）
+                    dates = pd.to_datetime(data.iloc[:, 0], errors='coerce')
+                    date_range = f"{dates.min().strftime('%m.%d')}-{dates.max().strftime('%m.%d')}"
+                    
+                    # 统计总项数（E列非空值且非nan）
+                    construction_units = data.iloc[:, 4].astype(str)
+                    valid_units = construction_units[construction_units.str.strip() != 'nan']
+                    total_items = len(valid_units)
+                    
+                    # 统计风险等级（K列）
+                    risk_counts = data.iloc[:, 10].value_counts()
+                    low_risk = risk_counts.get('低风险', 0)
+                    acceptable = risk_counts.get('可接受', 0)
+                    
+                    # 统计本单位和外施工单位（E列）
+                    internal_units = ['计量电网运维班', '计量用户运维一班', '计量用户运维二班']
+                    internal_mask = valid_units.isin(internal_units)
+                    internal_count = internal_mask.sum()
+                    external_count = (~internal_mask).sum()
+                    
+                    # 统计已发布项数（O列包含"已在系统发布"）
+                    published_count = data.iloc[:, 14].astype(str).str.contains('已在系统发布', na=False).sum()
+                    
+                    # 生成统计信息
+                    summary = f"（{date_range}）作业计划共审批{total_items}项（其中，低风险{low_risk}项，可接受{acceptable}项；本单位{internal_count}项，外施工单位{external_count}项），已在系统发布{published_count}项。\n\n"
+                    info_text += summary
+                    
+                    # 显示施工单位详细统计
+                    info_text += "施工单位统计:\n"
+                    unit_counts = valid_units.value_counts()
+                    for unit, count in unit_counts.items():
+                        if unit.strip():  # 排除空字符串
+                            info_text += f"{unit}: {count}条\n"
+                            
+                except Exception as e:
+                    info_text += f"统计过程中出错：{str(e)}\n"
                 
                 self.text_area.setText(info_text)
                 self.check_button.setEnabled(True)  # 启用规范检查按钮
