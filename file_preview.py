@@ -142,6 +142,37 @@ class FilePreviewWindow(QWidget):
             
             # 从第7行开始检查
             for row in range(7, ws.max_row + 1):
+                # 检查必填列是否为空
+                required_columns = {
+                    'A': '序号',
+                    'B': '作业类型（内容）',
+                    'C': '项目管理单位/部门',
+                    'D': '供电所',
+                    'E': '施工单位',
+                    'F': '施工地点',
+                    'G': '工作开始时间',
+                    'H': '工作结束时间',
+                    'I': '工作负责人及电话',
+                    'J': '专业',
+                    'K': '基准风险等级',
+                    'L': '是否需要停电',
+                    'M': '施工人数',
+                    'N': '是否纳入视频监督',
+                    
+                }
+                
+                for col, name in required_columns.items():
+                    cell_value = str(ws[f'{col}{row}'].value).strip()
+                    if not cell_value or cell_value == 'nan':
+                        ws[f'{col}{row}'].fill = yellow_fill
+                        invalid_rows.append({
+                            'row': row,
+                            'b': name,
+                            'd': '空',
+                            'f': f'{col}列不能为空',
+                            'type': '空单元格'
+                        })
+                
                 # 检查E列是否为指定内容
                 e_value = str(ws[f'E{row}'].value).strip()
                 if e_value in ["计量用户运维一班", "计量用户运维二班"]:

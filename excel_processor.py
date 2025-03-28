@@ -129,6 +129,7 @@ class ExcelProcessor:
         """合并多个Excel文件"""
         all_data = []
         all_errors = []
+        self.a3_content = None  # 新增属性存储A2/A3内容
         
         for file_path in file_paths:
             try:
@@ -177,6 +178,17 @@ class ExcelProcessor:
         try:
             # 合并所有数据
             self.merged_data = pd.concat(all_data, ignore_index=True)
+            
+            # 从第一个文件中获取A2/A3内容
+            if file_paths:
+                try:
+                    wb = load_workbook(file_paths[0])
+                    ws = wb.active
+                    self.a3_content = ws['A2'].value
+                    if not self.a3_content:
+                        self.a3_content = ws['A3'].value
+                except Exception:
+                    pass
             
             # 验证合并后的数据
             if len(self.merged_data) == 0:
@@ -230,6 +242,10 @@ class ExcelProcessor:
             # 加载模板文件
             wb = load_workbook(template_path)
             ws = wb.active
+            
+            # 写入A3内容
+            if self.a3_content:
+                ws['A3'].value = self.a3_content
             
             # 保存原始列宽
             original_column_widths = {}
@@ -348,4 +364,4 @@ class ExcelProcessor:
             
             return merged_df, None
         except Exception as e:
-            return None, f"处理文件时出错：{str(e)}" 
+            return None, f"处理文件时出错：{str(e)}"
