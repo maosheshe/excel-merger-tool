@@ -40,7 +40,20 @@ class MergeWorker(QThread):
             # 生成输出文件名
             desktop_path = os.path.join(os.path.expanduser('~'), 'Desktop')
             current_date = datetime.now().strftime('%Y%m%d')
-            output_file = os.path.join(desktop_path, f'附录2：营销现场作业计划审批表_{current_date}.xlsx')
+            
+            # 从第一个文件中获取A2/A3内容
+            try:
+                wb = load_workbook(self.files[0])
+                ws = wb.active
+                a2_content = ws['A2'].value
+                a3_content = ws['A3'].value
+                content = a2_content if a2_content else a3_content
+                if content:
+                    output_file = os.path.join(desktop_path, f'附录2：{content}.xlsx')
+                else:
+                    output_file = os.path.join(desktop_path, f'附录2：营销现场作业计划审批表_{current_date}.xlsx')
+            except Exception:
+                output_file = os.path.join(desktop_path, f'附录2：营销现场作业计划审批表_{current_date}.xlsx')
 
             # 保存文件
             success, message = self.processor.save_output(self.template_file, merged_data, output_file)
@@ -57,7 +70,8 @@ class MergeWorker(QThread):
 class ExcelMergerApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Excel文件合并工具")
+        self.version = "v1.0.0"  # 添加版本号
+        self.setWindowTitle(f"Excel文件合并工具 {self.version}")
         self.setMinimumSize(600, 400)
         
         # 获取程序运行目录
